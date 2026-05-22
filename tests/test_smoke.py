@@ -24,7 +24,7 @@ def test_imports():
 
 
 def test_tool_schemas_valid():
-    """Every tool schema has the fields the Groq / OpenAI function-calling API requires."""
+    """Every tool schema has the fields the OpenAI function-calling API requires."""
     from uae_copilot.agent.tools import TOOL_SCHEMAS
 
     assert len(TOOL_SCHEMAS) >= 5

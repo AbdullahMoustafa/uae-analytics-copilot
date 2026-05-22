@@ -147,11 +147,28 @@ def chat(
     configure_logging()
     settings = get_settings()
 
-    if not settings.groq_api_key:
+    # Check Ollama is reachable
+    import httpx
+    try:
+        r = httpx.get(f"{settings.ollama_host}/api/tags", timeout=3.0)
+        r.raise_for_status()
+        installed_models = {m["name"] for m in r.json().get("models", [])}
+    except Exception as e:
         console.print(
-            "[bold red]GROQ_API_KEY is not set.[/bold red] "
-            "Get a free key at https://console.groq.com/keys and add it to .env."
+            f"[bold red]Cannot reach Ollama at {settings.ollama_host}[/bold red]\n"
+            f"  {type(e).__name__}: {e}\n\n"
+            "Install Ollama from [link]https://ollama.com/download[/link], then in a separate terminal run:\n"
+            "  [cyan]ollama serve[/cyan]"
         )
+        raise typer.Exit(code=1)
+
+    if settings.model not in installed_models:
+        console.print(
+            f"[yellow]Model [bold]{settings.model}[/bold] is not pulled yet.[/yellow]\n"
+            f"Run: [cyan]ollama pull {settings.model}[/cyan]"
+        )
+        if installed_models:
+            console.print(f"Installed models: {', '.join(sorted(installed_models))}")
         raise typer.Exit(code=1)
 
     if not settings.warehouse_path.exists() or not settings.chroma_dir.exists():
@@ -164,7 +181,7 @@ def chat(
     console.print(
         Panel.fit(
             "[bold cyan]UAE Analytics Knowledge Copilot[/bold cyan]\n"
-            f"Provider: [yellow]Groq[/yellow]  •  Model: [yellow]{settings.model}[/yellow]\n"
+            f"Provider: [yellow]Ollama (local)[/yellow]  •  Model: [yellow]{settings.model}[/yellow]\n"
             "Type your question. /reset to clear history, /quit to exit.",
             border_style="cyan",
         )

@@ -56,7 +56,7 @@ def main() -> None:
         st.title("📊 UAE Copilot")
         st.caption("Agentic RAG over UAE economic indicators")
         st.markdown("---")
-        st.markdown("**Provider:** `Groq`")
+        st.markdown("**Provider:** `Ollama (local)`")
         st.markdown(f"**Model:** `{settings.model}`")
         st.markdown(f"**Country:** `{settings.country_iso3}`")
         st.markdown("---")
@@ -75,10 +75,14 @@ def main() -> None:
 
     st.title("UAE Analytics Knowledge Copilot")
 
-    if not settings.groq_api_key:
+    import httpx
+    try:
+        httpx.get(f"{settings.ollama_host}/api/tags", timeout=3.0).raise_for_status()
+    except Exception as e:
         st.error(
-            "GROQ_API_KEY is not set. Get a free key at https://console.groq.com/keys "
-            "and add it to your .env file."
+            f"Cannot reach Ollama at {settings.ollama_host}. "
+            f"Install from https://ollama.com/download and run `ollama serve`.\n\n"
+            f"Underlying error: {type(e).__name__}: {e}"
         )
         return
     if not settings.warehouse_path.exists():

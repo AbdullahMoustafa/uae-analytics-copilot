@@ -4,7 +4,9 @@ A conversational, tool-using agent that answers questions about United Arab Emir
 economic indicators — definitions, time series, cross-source reconciliation, and
 ad-hoc analysis — directly from World Bank and IMF open data.
 
-Built on Llama 3.3 70B via [Groq](https://groq.com) (free tier), with a
+Runs **fully local** on [Ollama](https://ollama.com) — no API keys, no usage limits,
+no data leaving your machine. Default model is Qwen 2.5 7B (works on ~6 GB free RAM);
+any tool-capable Ollama model is a drop-in swap. Backed by a
 [DuckDB](https://duckdb.org) warehouse, a [ChromaDB](https://www.trychroma.com)
 vector store for semantic search, and a curated cross-source lineage graph.
 
@@ -35,7 +37,7 @@ cited answer. Every numeric claim is grounded in a `(source, code)` reference.
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│              Agent loop  (Llama 3.3 70B via Groq)                    │
+│              Agent loop  (Ollama, local — default Qwen 2.5 7B)       │
 │  - 7 function-calling tools  - typed exception handling              │
 │  - per-turn trace events     - recovery from malformed tool calls    │
 └──────────────────────────────┬──────────────────────────────────────┘
@@ -68,10 +70,41 @@ cited answer. Every numeric claim is grounded in a `(source, code)` reference.
 ### Prerequisites
 
 - Python 3.11+
-- A free Groq API key — sign up at [console.groq.com/keys](https://console.groq.com/keys)
-- ~500 MB free disk for raw data and embeddings
+- [Ollama](https://ollama.com/download) installed and running
+- **~6 GB free RAM** for the default model (or pick a smaller one — see [Model recommendations](#model-recommendations))
+- ~500 MB free disk for raw data and embeddings (plus ~5 GB for the model itself)
 
-### Install
+### 1. Install Ollama and pull a model
+
+Install Ollama from [ollama.com/download](https://ollama.com/download). The installer
+starts a background service on `http://localhost:11434`.
+
+Then pull a tool-capable model:
+
+```powershell
+ollama pull qwen2.5:7b           # default — works on ~6 GB free RAM (~4.5 GB download)
+# alternatives:
+ollama pull qwen2.5:14b          # better tool accuracy if you have ~10 GB free RAM (~9 GB download)
+ollama pull llama3.2:3b          # fallback for low-RAM machines (~2 GB download)
+```
+
+Verify the model is registered:
+
+```powershell
+ollama list
+```
+
+> **Windows PATH gotcha** — the Ollama installer sometimes doesn't add `ollama` to
+> your `PATH`. If `ollama list` returns `'ollama' is not recognized`, run this in
+> PowerShell to fix it permanently:
+> ```powershell
+> [Environment]::SetEnvironmentVariable("Path",
+>   [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:LOCALAPPDATA\Programs\Ollama",
+>   "User")
+> ```
+> Then close PowerShell and open a new window.
+
+### 2. Install Python deps
 
 ```powershell
 python -m venv .venv
@@ -79,27 +112,34 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### Configure
+### 3. (Optional) Configure a different model
 
-Copy [.env.example](.env.example) to `.env` and paste in your Groq key:
+The project defaults to `qwen2.5:7b`. To use a different model, copy
+[.env.example](.env.example) to `.env` and set:
 
 ```
-GROQ_API_KEY=gsk_your-key-here
+UAE_COPILOT_MODEL=qwen2.5:14b
 ```
 
-### Build the corpus (one-time, ~5 minutes)
+(Or any other model name you've pulled via `ollama pull`.)
+
+### 4. Build the corpus (one-time, ~5 minutes)
 
 ```powershell
 python scripts/ingest.py        # pull World Bank + IMF data
 python scripts/build_index.py   # warehouse + lineage + vector index
 ```
 
-### Run
+### 5. Run
 
 ```powershell
 python scripts/chat.py                          # CLI
 streamlit run src/uae_copilot/app.py            # web UI
 ```
+
+The first message after startup is slow (~15-30 s) — Ollama loads the model into
+memory. Subsequent messages run at the model's normal speed (a few seconds per
+tool call on modern hardware).
 
 ---
 
@@ -222,18 +262,50 @@ PRO RAG/
 
 ## Provider notes
 
-**Groq** was chosen as the LLM provider for its free tier (~14,400 requests/day
-on `llama-3.3-70b-versatile`, ~12K tokens-per-minute) and OpenAI-compatible
-function calling. The agent loop in [`agent/agent.py`](src/uae_copilot/agent/agent.py)
-is the only file that depends on the provider SDK; switching to OpenAI, Together,
-Fireworks, or a local Ollama endpoint requires changing only the client and a few
-exception classes.
+**Ollama** runs the LLM locally via its OpenAI-compatible endpoint at
+`http://localhost:11434/v1`. No API key, no rate limits, no data egress —
+everything stays on your machine. The agent loop in
+[`agent/agent.py`](src/uae_copilot/agent/agent.py) uses the `openai` Python
+client pointed at Ollama, so switching to any OpenAI-compatible cloud provider
+(Groq, Together, Fireworks, OpenRouter, the real OpenAI) requires changing
+only the `base_url` and `api_key` arguments to `openai.OpenAI(...)`.
+
+### Model recommendations
+
+Pick a model based on the free RAM on your machine:
+
+| Model | Disk | RAM at runtime | Tool-use quality for this agent |
+|---|---|---|---|
+| `qwen2.5:7b` | ~4.5 GB | ~5 GB | **Default** — good balance, occasional recoveries on multi-tool queries |
+| `llama3.1:8b` | ~4.9 GB | ~5 GB | Similar to qwen 7b; pick whichever you already have |
+| `qwen2.5:14b` | ~9 GB | ~9 GB | Best tool-call accuracy of locally-runnable options; upgrade if you have the RAM |
+| `qwen2.5:32b` | ~20 GB | ~20 GB | Highest quality, slow on CPU; ideal on machines with a discrete GPU |
+| `llama3.2:3b` | ~2 GB | ~3 GB | Fallback for low-RAM machines; tool calls drift more often (recovery code catches them) |
+
+Smaller / non-tool-capable models will produce malformed tool calls or skip
+tool use entirely. Stick to models from
+[Ollama's library](https://ollama.com/library) that explicitly list "Tools" support.
+
+### Embeddings
 
 Embeddings run locally via
 [`sentence-transformers/all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
 (~80 MB model, no API key required). Swap for a hosted embedding provider in
 [`retrieval/embeddings.py`](src/uae_copilot/retrieval/embeddings.py) if you need
 higher recall.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `'ollama' is not recognized as a cmdlet` | Ollama installer didn't add itself to PATH | See the [Windows PATH gotcha](#1-install-ollama-and-pull-a-model) in setup |
+| `RuntimeError: Model 'X' is not available on Ollama. Pull it first` | Model in `.env` hasn't been pulled | `ollama pull X` (use the model name from the error) |
+| `InternalServerError: model requires more system memory (X GiB) than is available (Y GiB)` | Model is too big for free RAM | Pull a smaller model and update `UAE_COPILOT_MODEL` in `.env` |
+| `Cannot reach Ollama at http://localhost:11434` | Ollama service isn't running | `ollama serve` in a separate terminal, or restart the Ollama app |
+| Tool calls trigger `recovered: True` in the trace often | Model is misformatting tool calls | Normal for smaller models — the agent's recovery path handles it. If frequent, upgrade to `qwen2.5:14b` |
+| First message is very slow | Ollama is loading the model into RAM | Normal on first message. Subsequent messages will be fast. |
 
 ---
 

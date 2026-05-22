@@ -21,7 +21,7 @@ from ..storage.duckdb_store import Warehouse
 logger = logging.getLogger(__name__)
 
 
-# --- Tool schemas (Groq / OpenAI function-calling format) ---
+# --- Tool schemas (OpenAI function-calling format, also accepted by Ollama) ---
 # Passed to the model via the `tools` parameter on chat.completions.create().
 
 TOOL_SCHEMAS: list[dict[str, Any]] = [
@@ -372,7 +372,7 @@ def _list_topics(ctx: ToolContext) -> dict:
     """Return a compact catalog: name + indicator count + sources only.
 
     Descriptions are intentionally dropped here — they add ~8K tokens which
-    blows past Groq free-tier TPM limits. The agent can drill in with
+    blows past the model's context window on local Ollama runs. The agent can drill in with
     list_indicators_in_topic to see what each topic contains.
     Topics with no ingested indicators are filtered out.
     """

@@ -6,15 +6,14 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings.
 
-    All fields can be overridden by environment variables (prefix `UAE_COPILOT_`)
-    except the Groq key, which uses the standard `GROQ_API_KEY`.
+    All fields can be overridden by environment variables with prefix `UAE_COPILOT_`.
+    Ollama runs locally and requires no API key.
     """
 
     model_config = SettingsConfigDict(
@@ -24,12 +23,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # --- Groq API ---
-    groq_api_key: str = Field(default="", validation_alias="GROQ_API_KEY")
-    # llama-3.3-70b-versatile has the strongest tool calling on Groq's free tier
-    model: str = "llama-3.3-70b-versatile"
-    temperature: float = 0.2  # low temperature for analytical / tool-call accuracy
+    # --- Ollama (local) ---
+    ollama_host: str = "http://localhost:11434"
+    # qwen2.5:7b is the safe default — needs ~5 GB RAM and runs on most laptops.
+    # Override to qwen2.5:14b in .env if you have ~10 GB free RAM for better
+    # tool-call accuracy on multi-step queries.
+    model: str = "qwen2.5:7b"
+    temperature: float = 0.2  # low for analytical / tool-call accuracy
     max_tokens: int = 4096
+    num_ctx: int = 8192       # Ollama's default is 2K — bump for our system prompt + tools
     max_agent_turns: int = 10  # safety cap on the agent loop
 
     # --- Paths ---
@@ -63,6 +65,11 @@ class Settings(BaseSettings):
     def warehouse_path(self) -> Path:
         return self.data_dir / "warehouse.duckdb"
 
+    @property
+    def ollama_base_url(self) -> str:
+        """Base URL for the OpenAI-compatible Ollama endpoint."""
+        return self.ollama_host.rstrip("/") + "/v1"
+
     def ensure_dirs(self) -> None:
         for d in (self.raw_dir, self.processed_dir, self.chroma_dir):
             d.mkdir(parents=True, exist_ok=True)
@@ -81,6 +88,5 @@ def configure_logging(level: str | None = None) -> None:
         format="%(asctime)s | %(levelname)-7s | %(name)-30s | %(message)s",
         datefmt="%H:%M:%S",
     )
-    # Silence noisy 3rd-party loggers
-    for noisy in ("httpx", "httpcore", "urllib3", "chromadb"):
+    for noisy in ("httpx", "httpcore", "urllib3", "chromadb", "openai"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
